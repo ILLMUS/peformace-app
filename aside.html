@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Performance Tracker — ORB Pro</title>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- jsPDF + html2canvas -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+:root { --bg:#0B1220; --card:#0f1724; --muted:#9aa6b2; --accent:#7c3aed; --success:#16a34a; --danger:#ef4444; }
+[data-theme="light"] { --bg:#f6f8fb; --card:#fff; --muted:#475569; --accent:#5b21b6; color:#0b1220; }
+*{box-sizing:border-box;font-family:Inter,system-ui,Roboto,Arial,sans-serif}
+body{margin:0;background:linear-gradient(180deg,var(--bg),#020617);color:#e6eef6;padding:14px}
+.app{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 380px;gap:14px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#ef4444);display:flex;align-items:center;justify-content:center;font-weight:700}
+h1{margin:0;font-size:18px}
+p.lead{margin:0;color:var(--muted);font-size:13px}
+.card{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+input,select,button,textarea{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+button{background:linear-gradient(90deg,var(--accent),#ef4444);color:white;border:none;cursor:pointer}
+button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+form{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+form .full{grid-column:1 / -1}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left}
+.metrics{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.metric{background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;min-width:120px}
+canvas{width:100%!important;height:220px!important}
+.heatmap, .calendar { display:grid; grid-template-columns: repeat(7, 1fr); gap:6px; margin-top:8px }
+.heat-cell { height:38px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;background:rgba(255,255,255,0.02) }
+.small{font-size:13px;color:var(--muted)}
+@media (max-width:980px){ .app{grid-template-columns:1fr} header{flex-direction:column;align-items:flex-start;gap:10px} }
+</style>
+</head>
+<body data-theme="dark">
+
+<!-- AUTH -->
+<div id="authBox" style="max-width:360px;margin:20px auto;display:none">
+  <h3>Sign in to RST Divinity Sealed</h3>
+  <input id="authEmail" type="email" placeholder="Email" style="width:100%;margin:6px 0">
+  <input id="authPassword" type="password" placeholder="Password" style="width:100%;margin:6px 0">
+  <button id="loginBtn" style="width:100%">Login</button>
+  <button id="signupBtn" style="width:100%;margin-top:6px">Create Account</button>
+  <p id="authMsg" style="color:#f87171;margin-top:6px"></p>
+</div>
+
+<div id="userBar" style="display:none;text-align:right;margin:10px 0">
+  <span id="userEmail"></span>
+  <button id="logoutBtn">Logout</button>
+</div>
+
+<header>
+  <div class="brand">
+    <div class="logo">PT</div>
+    <div>
+      <h1>Performance Tracker — ORB Pro</h1>
+      <p class="lead">Live prices, heatmap, equity curve, PDFs, analytics — offline-first, mobile-friendly.</p>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <label class="small">Theme</label>
+    <select id="themeSel"><option value="dark">Dark</option><option value="light">Light</option></select>
+    <button id="downloadAll" class="ghost">Download HTML</button>
+  </div>
+</header>
+
+<main class="app">
+  <!-- LEFT -->
+  <section>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="small">Account</div><div style="font-weight:700" id="acctVal">$0</div></div>
+        <div class="small">Auto-saves to your browser</div>
+      </div>
+
+      <form id="tradeForm" onsubmit="return false;" style="margin-top:10px">
+        <input id="date" type="date" class="full" />
+        <select id="pair"><option>US100</option><option>US500</option><option>XAUUSD</option><option>BTCUSD</option><option>EURUSD</option></select>
+        <select id="side"><option>Buy</option><option>Sell</option></select>
+        <input id="lots" type="number" step="0.01" value="0.05" placeholder="Lots"/>
+        <input id="entry" placeholder="Entry price (optional)" />
+        <input id="exit" placeholder="Exit price (optional)" />
+        <input id="points" placeholder="Points (auto if entry+exit provided)" />
+        <input id="result" placeholder="Result $ (optional, auto-calc)" />
+        <input id="atr" placeholder="ATR (optional)" />
+        <textarea id="notes" class="full" placeholder="Notes (setup, screenshot link)"></textarea>
+        <div class="full" style="display:flex;gap:8px">
+          <button id="addBtn">Add Trade</button>
+          <button id="importBtn" class="ghost" type="button">Import CSV</button>
+          <input id="fileInput" type="file" accept=".csv" style="display:none" />
+          <button id="clearBtn" class="ghost" type="button">Clear All</button>
+        </div>
+      </form>
+
+      <div class="small" style="margin-top:8px">Tip: enter entry & exit to auto-calc points. Or paste points directly (positive win, negative loss).</div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="small">Analytics</div><div style="font-weight:700">Performance Summary</div></div>
+        <div class="small">Trades: <span id="tradeCount">0</span></div>
+      </div>
+
+      <div class="metrics" id="metricsWrap">
+        <div class="metric"><div class="small">Win Rate</div><div id="winRate" style="font-weight:700">0%</div></div>
+        <div class="metric"><div class="small">Avg Win</div><div id="avgWin" style="font-weight:700">$0.00</div></div>
+        <div class="metric"><div class="small">Avg Loss</div><div id="avgLoss" style="font-weight:700">$0.00</div></div>
+        <div class="metric"><div class="small">Expectancy</div><div id="expectancy" style="font-weight:700">$0.00</div></div>
+        <div class="metric"><div class="small">Profit Factor</div><div id="pf" style="font-weight:700">0</div></div>
+        <div class="metric"><div class="small">Max Drawdown</div><div id="dd" style="font-weight:700">$0</div></div>
+      </div>
+
+      <div style="margin-top:12px">
+        <canvas id="equityChart"></canvas>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="small">Trades Log</div>
+        <div class="small">Edit lots/result inline</div>
+      </div>
+      <table id="tradesTable">
+        <thead><tr><th>Date</th><th>Pair</th><th>Side</th><th>Lots</th><th>Points</th><th>Result $</th><th>Notes</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- RIGHT -->
+  <aside>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="small">Heatmap (Day × Hour)</div><div style="font-weight:700">Performance Heatmap</div></div><div class="small">Green = wins</div></div>
+      <div id="heatmap" class="heatmap" style="margin-top:8px"></div>
+      <div class="small" style="margin-top:6px">Day-of-week vs hour (aggregated)</div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="small">Calendar</div><div style="font-weight:700">Trade Frequency</div></div><div class="small">Count per day</div></div>
+      <div id="calendar" class="calendar"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="small">Live Price Snapshot</div>
+      <div style="display:grid;gap:8px;margin-top:8px">
+        <select id="provider">
+          <option value="twelvedata">TwelveData (easy)</option>
+          <option value="finnhub">Finnhub</option>
+          <option value="custom">Custom URL</option>
+        </select>
+        <input id="symbol" placeholder="Symbol (ex: NQ, ^NDX, US500, BTCUSD)" />
+        <input id="apiKey" placeholder="API Key" />
+        <input id="customUrl" placeholder="Custom URL template (use {symbol} & {apikey})" style="display:none" />
+        <div style="display:flex;gap:8px">
+          <button id="getPriceBtn">Get Live Price</button>
+          <button id="autoPriceBtn" class="ghost">Auto: Off</button>
+        </div>
+        <div class="small">Example: TwelveData → https://api.twelvedata.com/price?symbol={symbol}&apikey={apikey}</div>
+        <div id="livePrice" style="margin-top:8px;font-weight:700">Price: --</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="small">Monthly Report</div><div style="font-weight:700">Export / Print</div></div></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="monthlyPdfBtn">Download Monthly Report (PDF)</button>
+        <button id="downloadCsv" class="ghost">Export CSV</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<script>
+// ---------------- Supabase Init
+const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_PUBLIC_ANON_KEY';
+const supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ---------------- State
+let currentUser=null, trades=[], tradesSubscription=null;
+const LS_KEY='pt_pro_trades_v1';
+const STORAGE_MODE={LOCAL:'local',CLOUD:'cloud'};
+let currentStorageMode=STORAGE_MODE.LOCAL;
+const pairFactor={US100:1,US500:1,XAUUSD:0.1,BTCUSD:0.05,EURUSD:0.1};
+
+// ---------------- TradeStore
+const TradeStore={
+  async getAll(){
+    if(currentStorageMode===STORAGE_MODE.LOCAL) return JSON.parse(localStorage.getItem(LS_KEY)||'[]');
+    if(!currentUser) return [];
+    const {data,error}=await supabase.from('trades').select('*').eq('user_id',currentUser.id);
+    if(error){console.error(error);return []}
+    const localTrades=JSON.parse(localStorage.getItem(LS_KEY)||'[]');
+    const merged=[...data]; localTrades.forEach(l=>{if(!merged.find(c=>c.id===l.id)) merged.push(l)});
+    return merged;
+  },
+  async saveAll(ts){
+    if(currentStorageMode===STORAGE_MODE.LOCAL){localStorage.setItem(LS_KEY,JSON.stringify(ts));return;}
+    const upserts=ts.map(t=>({...t,user_id:currentUser.id}));
+    const {error}=await supabase.from('trades').upsert(upserts);
+    if(error) console.error(error);
+    localStorage.setItem(LS_KEY,JSON.stringify(ts));
+  },
+  async clear(){
+    if(currentStorageMode===STORAGE_MODE.LOCAL){localStorage.removeItem(LS_KEY);return;}
+    const {error}=await supabase.from('trades').delete().eq('user_id',currentUser.id);
+    if(error) console.error(error);
+    localStorage.removeItem(LS_KEY);
+  },
+  async sync(){
+    const cloud=currentUser?await this.getAll():[];
+    const local=JSON.parse(localStorage.getItem(LS_KEY)||'[]');
+    const merged=[...cloud]; local.forEach(l=>{if(!merged.find(c=>c.id===l.id)) merged.push(l)});
+    localStorage.setItem(LS_KEY,JSON.stringify(merged));
+    return merged;
+  }
+};
+
+// ---------------- AUTH UI
+const authBox=document.getElementById('authBox');
+const userBar=document.getElementById('userBar');
+const authMsg=document.getElementById('authMsg');
+const emailInp=document.getElementById('authEmail');
+const passInp=document.getElementById('authPassword');
+const loginBtn=document.getElementById('loginBtn');
+const signupBtn=document.getElementById('signupBtn');
+const logoutBtn=document.getElementById('logoutBtn');
+const userEmailEl=document.getElementById('userEmail');
+
+function showAuth(){authBox.style.display='block';userBar.style.display='none';}
+function showUser(u){authBox.style.display='none';userBar.style.display='block';userEmailEl.textContent=u.email;}
+
+loginBtn.onclick = async () => {
+  authMsg.textContent='Signing in…';
+  const {data,error} = await supabase.auth.signInWithPassword({email: emailInp.value,password: passInp.value});
+  if(error) authMsg.textContent=error.message;
+  else {
+    currentUser = data.user;
+    showUser(currentUser);
+    trades = await TradeStore.sync();
+    render();
+  }
+};
+
+signupBtn.onclick = async () => {
+  authMsg.textContent='Creating account…';
+  const {data,error} = await supabase.auth.signUp({email: emailInp.value,password: passInp.value});
+  authMsg.textContent = error ? error.message : 'Check your email to confirm.';
+};
+
+logoutBtn.onclick = async () => {
+  await supabase.auth.signOut();
+  currentUser = null;
+  showAuth();
+};
+// ---------------- DOM refs
+const tbody=document.querySelector('#tradesTable tbody');
+const tradeCountEl=document.getElementById('tradeCount');
+const winRateEl=document.getElementById('winRate');
+const avgWinEl=document.getElementById('avgWin');
+const avgLossEl=document.getElementById('avgLoss');
+const expectancyEl=document.getElementById('expectancy');
+const pfEl=document.getElementById('pf');
+const ddEl=document.getElementById('dd');
+const netPLEl=document.getElementById('acctVal');
+const livePriceEl=document.getElementById('livePrice');
+
+let equityChart;
+let autoPrice=false, autoInterval;
+
+// ---------------- Utilities
+function perPointValue(pair,lots){
+  const factor=pairFactor[pair]||1;
+  return (lots*100)*factor;
+}
+
+function calcResultFromPoints(pair,lots,points){
+  return +(points*perPointValue(pair,lots)).toFixed(2);
+}
+
+// ---------------- Rendering
+function render(){
+  tbody.innerHTML='';
+  trades.forEach((t,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td>${t.date}</td>
+      <td>${t.pair}</td>
+      <td>${t.side}</td>
+      <td><input data-index="${i}" data-field="lots" value="${t.lots}" style="width:72px"></td>
+      <td><input data-index="${i}" data-field="points" value="${t.points||''}" style="width:80px"></td>
+      <td><input data-index="${i}" data-field="result" value="${t.result||''}" style="width:100px"></td>
+      <td>${t.notes||''}</td>
+      <td><button class="del" data-index="${i}">Del</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  attachRowHandlers();
+
+  // analytics
+  const results=trades.map(t=>({...t,result:Number(t.result||0)}));
+  const total=results.reduce((s,r)=>s+r.result,0);
+  const wins=results.filter(r=>r.result>0);
+  const losses=results.filter(r=>r.result<=0);
+  const avgWin=wins.length?wins.reduce((s,r)=>s+r.result,0)/wins.length:0;
+  const avgLoss=losses.length?losses.reduce((s,r)=>s+r.result,0)/losses.length:0;
+  const winRate=results.length?(wins.length/results.length)*100:0;
+  const grossWin=wins.reduce((s,r)=>s+r.result,0);
+  const grossLoss=Math.abs(losses.reduce((s,r)=>s+r.result,0));
+  const expectancy=(winRate/100)*avgWin-((100-winRate)/100)*Math.abs(avgLoss);
+  const pf=grossLoss?(grossWin/grossLoss):(grossWin>0?Infinity:0);
+
+  tradeCountEl.textContent=results.length;
+  winRateEl.textContent=winRate.toFixed(1)+'%';
+  avgWinEl.textContent='$'+avgWin.toFixed(2);
+  avgLossEl.textContent='$'+Math.abs(avgLoss).toFixed(2);
+  expectancyEl.textContent='$'+expectancy.toFixed(2);
+  pfEl.textContent=pf===Infinity?'∞':(pf?pf.toFixed(2):'0');
+  netPLEl.textContent='$'+total.toFixed(2);
+  ddEl.textContent='$'+maxDrawdown(results).toFixed(2);
+
+  // equity chart
+  const labels=results.map(r=>r.date);
+  let cum=0; const equity=results.map(r=>cum+=r.result);
+  if(!equityChart){
+    const ctx=document.getElementById('equityChart').getContext('2d');
+    equityChart=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Equity',data:equity,fill:true,backgroundColor:'rgba(124,58,237,0.12)',borderColor:'#7c3aed'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+  }else{equityChart.data.labels=labels;equityChart.data.datasets[0].data=equity;equityChart.update();}
+  renderHeatmap(results);
+  renderCalendar(results);
+}
+
+function maxDrawdown(results){
+  let cum=0,peak=-Infinity,maxDD=0;
+  results.forEach(r=>{cum+=r.result;if(cum>peak)peak=cum;const dd=peak-cum;if(dd>maxDD)maxDD=dd;});
+  return maxDD;
+}
+
+// ---------------- Row handlers
+function attachRowHandlers(){
+  tbody.querySelectorAll('input').forEach(inp=>{
+    inp.onchange=e=>{
+      const i=+e.target.dataset.index,f=e.target.dataset.field;
+      trades[i][f]=isNaN(e.target.value)?e.target.value:Number(e.target.value);
+      if(f==='lots'||f==='points'||f==='pair'){const t=trades[i];if(t.points!=null&&!isNaN(t.points)) t.result=calcResultFromPoints(t.pair,t.lots,t.points);}
+      TradeStore.saveAll(trades);
+      render();
+    }
+  });
+  tbody.querySelectorAll('.del').forEach(btn=>btn.onclick=()=>{
+    const i=+btn.dataset.index;
+    trades.splice(i,1);
+    TradeStore.saveAll(trades);
+    render();
+  });
+}
+
+// ---------------- Button functionalities
+
+// Add Trade
+document.getElementById('addBtn').addEventListener('click',()=>{
+  const date=document.getElementById('date').value||(new Date()).toISOString().slice(0,10);
+  const pair=document.getElementById('pair').value;
+  const side=document.getElementById('side').value;
+  const lots=parseFloat(document.getElementById('lots').value)||0.01;
+  let points=parseFloat(document.getElementById('points').value);
+  const entry=parseFloat(document.getElementById('entry').value);
+  const exit=parseFloat(document.getElementById('exit').value);
+  let result=document.getElementById('result').value;
+  const atr=document.getElementById('atr').value;
+  const notes=document.getElementById('notes').value;
+
+  if((!points||isNaN(points))&&entry&&exit) points=+((side==='Buy')?(exit-entry):(entry-exit)).toFixed(2);
+  if((!result||result==='')&&points!=null&&!isNaN(points)) result=calcResultFromPoints(pair,lots,points);
+  else result=result?Number(result):0;
+
+  trades.push({date,pair,side,lots,points,result,atr,notes,time:(new Date()).toISOString()});
+  document.getElementById('points').value=''; document.getElementById('result').value=''; document.getElementById('entry').value=''; document.getElementById('exit').value=''; document.getElementById('notes').value='';
+  TradeStore.saveAll(trades);
+  render();
+});
+
+// Clear All
+document.getElementById('clearBtn').addEventListener('click',async()=>{
+  if(confirm('Clear all trades?')){
+    trades=[];
+    await TradeStore.clear();
+    render();
+  }
+});
+
+// Import CSV
+document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const rows=ev.target.result.split(/\r?\n/).filter(r=>r.trim());
+    rows.forEach(r=>{
+      const cols=r.split(',').map(c=>c.trim());
+      const obj={date:cols[0]||(new Date()).toISOString().slice(0,10),pair:cols[1]||'US100',side:cols[2]||'Buy',lots:Number(cols[3]||0.01),points:Number(cols[4]||0),result:cols[5]?Number(cols[5]):calcResultFromPoints(cols[1]||'US100',Number(cols[3]||0.01),Number(cols[4]||0)),notes:cols[6]||''};
+      trades.push(obj);
+    });
+    TradeStore.saveAll(trades);
+    render();
+  };
+  reader.readAsText(f);
+});
+
+// Export CSV
+document.getElementById('downloadCsv').addEventListener('click',()=>{
+  const csv=trades.map(t=>`${t.date},${t.pair},${t.side},${t.lots},${t.points||''},${t.result||''},${t.notes||''}`).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='trades_export.csv'; a.click(); URL.revokeObjectURL(url);
+});
+
+// Download HTML
+document.getElementById('downloadAll').addEventListener('click',()=>{
+  const html='<!doctype html>\n'+document.documentElement.outerHTML;
+  const blob=new Blob([html],{type:'text/html'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='performance_tracker_pro.html'; a.click(); URL.revokeObjectURL(url);
+});
+
+// Monthly PDF
+document.getElementById('monthlyPdfBtn').addEventListener('click',generateMonthlyPDF);
+async function generateMonthlyPDF(){
+  const month=(new Date()).toISOString().slice(0,7);
+  const filtered=trades.filter(t=>(t.date||'').slice(0,7)===month);
+  const wins=filtered.filter(t=>t.result>0),losses=filtered.filter(t=>t.result<=0);
+  const grossWin=wins.reduce((s,r)=>s+r.result,0),grossLoss=Math.abs(losses.reduce((s,r)=>s+r.result,0));
+  const winRate=filtered.length?(wins.length/filtered.length)*100:0;
+  const avgWin=wins.length?grossWin/wins.length:0;
+  const avgLoss=losses.length?grossLoss/losses.length:0;
+  const pf=grossLoss?grossWin/grossLoss:(grossWin>0?Infinity:0);
+
+  const node=document.createElement('div'); node.style.padding='18px'; node.style.background='#fff'; node.style.color='#000'; node.style.width='800px';
+  node.innerHTML=`<h2>Monthly Report — ${month}</h2>
+  <p>Total trades: ${filtered.length} • Wins: ${wins.length} • Losses: ${losses.length} • Win rate: ${winRate.toFixed(1)}%</p>
+  <p>Gross win: $${grossWin.toFixed(2)} • Gross loss: $${grossLoss.toFixed(2)} • Profit factor: ${pf===Infinity?'∞':pf.toFixed(2)}</p>
+  <p>Avg win: $${avgWin.toFixed(2)} • Avg loss: $${avgLoss.toFixed(2)}</p>
+  <h3>Equity Snapshot</h3>
+  <div id="rep-chart" style="width:760px;height:220px"></div>
+  <h3>Top trades</h3>
+  <ol>${filtered.sort((a,b)=>b.result-a.result).slice(0,10).map(t=>`<li>${t.date} ${t.pair} ${t.side} $${t.result.toFixed(2)} (${t.notes||''})</li>`).join('')}</ol>
+  `;
+  document.body.appendChild(node);
+
+  const canvas=document.createElement('canvas'); canvas.width=760; canvas.height=220; node.querySelector('#rep-chart').appendChild(canvas);
+  const ctx=canvas.getContext('2d'); let cum=0; const labels=[],data=[];
+  filtered.forEach(t=>{labels.push(t.date); cum+=t.result; data.push(cum);});
+  new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Equity',data,borderColor:'#7c3aed',backgroundColor:'rgba(124,58,237,0.12)',fill:true}]},options:{responsive:false,plugins:{legend:{display:false}}}});
+
+  const canvasImg=await html2canvas(node,{scale:2});
+  const imgData=canvasImg.toDataURL('image/png');
+  const {jsPDF}=window.jspdf;
+  const pdf=new jsPDF({orientation:'portrait',unit:'px',format:'a4'});
+  const pdfW=pdf.internal.pageSize.getWidth();
+  const imgW=pdfW-40; const imgH=(canvasImg.height*imgW)/canvasImg.width;
+  pdf.addImage(imgData,'PNG',20,20,imgW,imgH);
+  pdf.save(`monthly_report_${month}.pdf`);
+  document.body.removeChild(node);
+}
+
+// ---------------- Live Price
+document.getElementById('getPriceBtn').addEventListener('click',fetchPrice);
+document.getElementById('autoPriceBtn').addEventListener('click',()=>{
+  autoPrice=!autoPrice;
+  document.getElementById('autoPriceBtn').textContent=autoPrice?'Auto: On':'Auto: Off';
+  if(autoPrice){autoInterval=setInterval(fetchPrice,15000); fetchPrice();}
+  else clearInterval(autoInterval);
+});
+
+async function fetchPrice(){
+  const provider=document.getElementById('provider').value;
+  const symbol=encodeURIComponent(document.getElementById('symbol').value.trim());
+  const apikey=document.getElementById('apiKey').value.trim();
+  const custom=document.getElementById('customUrl').value.trim();
+  if(!symbol||(!apikey&&provider!=='custom'&&!custom)){alert('Please enter symbol and API key (or provide custom URL).return;')}
+  try{
+    livePriceEl.textContent='Connecting…';
+    let url;
+    if(provider==='twelvedata'){url=`https://api.twelvedata.com/price?symbol=${symbol}&apikey=${apikey}`;const res=await fetch(url);const j=await res.json();if(j.price!==undefined){livePriceEl.textContent=`${symbol} → ${j.price}`;return;} throw new Error(j.message||'invalid response');}
+    else if(provider==='finnhub'){url=`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apikey}`;const res=await fetch(url);const j=await res.json();if(j.c!==undefined){livePriceEl.textContent=`${symbol} → ${j.c}`;return;} throw new Error('invalid response');}
+    else{url=custom.replace(/{symbol}/g,symbol).replace(/{apikey}/g,apikey);const res=await fetch(url);const j=await res.json();const possible=j.price||j.c||j.data?.price||j[0]?.price||j[0]?.p;if(possible!==undefined){livePriceEl.textContent=`${symbol} → ${possible}`;return;} livePriceEl.textContent=JSON.stringify(j).slice(0,200);}
+  }catch(err){livePriceEl.textContent='Error: '+(err.message||err);}
+}
+
+// ---------------- Theme
+document.getElementById('themeSel').addEventListener('change',e=>document.body.setAttribute('data-theme',e.target.value));
+
+// ---------------- Init
+(async()=>{trades=await TradeStore.getAll(); render();})();
+
+
+</script>
+
+</body>
+</html>
