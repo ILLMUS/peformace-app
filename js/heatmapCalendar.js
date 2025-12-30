@@ -33,7 +33,25 @@ function renderCalendar(results){
   const cal = document.getElementById('calendar'); cal.innerHTML='';
   // group by date (YYYY-MM-DD)
   const map = {};
-  results.forEach(r=>{ const d = (r.date || r.time).slice(0,10); map[d] = map[d]||{count:0,sum:0}; map[d].count++; map[d].sum += r.result; });
+
+
+  /* TODO later fix:
+  results.forEach(r=>{ 
+    const d = (r.date || r.time).slice(0,10); 
+    map[d] = map[d]||{count:0,sum:0}; map[d].count++; 
+    map[d].sum += r.result; });*/
+
+    results.forEach(r => {
+  const rawDate = r.date || r.time;
+  if (!rawDate) return; // ← critical guard
+
+  const d = rawDate.slice(0, 10);
+
+  map[d] = map[d] || { count: 0, sum: 0 };
+  map[d].count++;
+  map[d].sum += Number(r.result) || 0;
+});
+
   // show last 30 days
   const days=30; const now = new Date();
   for(let i=days-1;i>=0;i--){
@@ -47,7 +65,7 @@ function renderCalendar(results){
     else if(obj.sum>0) el.style.background = `rgba(16,185,129,${0.15 + intensity*0.7})`;
     else el.style.background = `rgba(239,68,68,${0.15 + intensity*0.7})`;
     el.title = `${key} • trades ${obj.count} • net $${obj.sum.toFixed(2)}`;
-    el.textContent = `${d.getDate()}`;
+    el.textContent = d.getDate().toString();
     cal.appendChild(el);
   }
 }

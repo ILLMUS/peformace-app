@@ -20,7 +20,24 @@ document.getElementById('addBtn').addEventListener('click', ()=>{
     result = calcResultFromPoints(pair, lots, points);
   } else result = result?Number(result):0;
 
-  trades.push({ date, pair, side, lots, points, result, atr, notes, time: (new Date()).toISOString() });
+const trade = {
+  date,
+  pair,
+  side,
+  lots,
+  points,
+  result,
+  atr,
+  notes,
+  time: (new Date()).toISOString()
+};
+
+trades.push(trade);
+save();
+
+// 👇 THIS is what you were missing
+persistTradeToSupabase(trade);
+
   // clear fields
   document.getElementById('points').value=''; document.getElementById('result').value=''; document.getElementById('entry').value=''; document.getElementById('exit').value=''; document.getElementById('notes').value='';
   save();
